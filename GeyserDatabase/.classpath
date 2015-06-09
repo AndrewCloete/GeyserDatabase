@@ -11,5 +11,6 @@
 	<classpathentry kind="lib" path="/home/andrew/eclipse/plugins/org.apache.commons.httpclient_3.1.0.v201012070820.jar"/>
 	<classpathentry kind="lib" path="/home/andrew/eclipse/plugins/org.apache.commons.logging_1.1.1.v201101211721.jar"/>
 	<classpathentry kind="lib" path="/home/andrew/git/GeyserNIP/GeyserNIP/bin"/>
+	<classpathentry kind="lib" path="/home/andrew/M-Eng/SoftwareWorkspace/apache-tomcat-7.0.59/lib/mysql-connector-java-5.1.35-bin.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>

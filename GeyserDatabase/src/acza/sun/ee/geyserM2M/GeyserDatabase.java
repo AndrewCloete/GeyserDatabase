@@ -16,7 +16,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -42,6 +41,16 @@ public class GeyserDatabase {
 	private static SCLapi nscl = new SCLapi();
 	private static int APOC_PORT;
 
+	// JDBC driver name and database URL
+	private static final String JDBC_DRIVER = "com.mysql.jdbc.Driver";  
+	private static final String DB_URL = "jdbc:mysql://localhost/GeyserSimM2M";
+
+	//  Database credentials
+	private static final String USER = "root";
+	private static final String PASS = "2538";
+	
+	private static Connection rdb_conn = null;
+	
 
 	public static void main(String args[]){
 		// ---------------------- Sanity checking of command line arguments -------------------------------------------
@@ -88,7 +97,60 @@ public class GeyserDatabase {
 		}
 		/* ********************************************************************************************/
 		
-		
+		/* ***************************** Test SQL RDB ************************************************/
+
+		Statement stmt = null;
+		try{
+			//Register JDBC driver
+			Class.forName(JDBC_DRIVER);
+
+			//Open a connection
+			System.out.println("Connecting to database...");
+			rdb_conn = DriverManager.getConnection(DB_URL,USER,PASS);
+
+			//Execute a query
+			System.out.println("Creating statement...");
+			stmt = rdb_conn.createStatement();
+			String sql;
+			sql = "SELECT username FROM user";
+			ResultSet rs = stmt.executeQuery(sql);
+
+			//Extract data from result set
+			while(rs.next()){
+				//Retrieve by column name
+				String username = rs.getString("username");
+
+				//Display values
+				System.out.println("RDB username: " + username);
+
+			}
+			//Clean-up environment
+			rs.close();
+			stmt.close();
+			rdb_conn.close();
+		}catch(SQLException se){
+			//Handle errors for JDBC
+			se.printStackTrace();
+		}catch(Exception e){
+			//Handle errors for Class.forName
+			e.printStackTrace();
+		}finally{
+			//finally block used to close resources
+			try{
+				if(stmt!=null)
+					stmt.close();
+			}catch(SQLException se2){
+			}// nothing we can do
+			try{
+				if(rdb_conn!=null)
+					rdb_conn.close();
+			}catch(SQLException se){
+				se.printStackTrace();
+			}//end finally try
+		}//end try
+		System.out.println("Goodbye!");
+		/* ********************************************************************************************/
+
 		/*	PSEUDO:
 		 * Subscribe to "applications"
 		 * (Only once):
@@ -96,7 +158,7 @@ public class GeyserDatabase {
 		 	* Subscribe to content (both DATA and SETTINGS?)
 		 * 
 		 */
-		
+		/*
 		//Look for all existing GEYSER applications and subscribe to them.
 		List<String> appList = nscl.retrieveApplicationList();
 		for(String app : appList){
@@ -107,7 +169,7 @@ public class GeyserDatabase {
 		}
 		
 		nscl.subscribeToApplications("database", "localhost:"+ APOC_PORT);
-		
+		*/
 
 	}
 	
