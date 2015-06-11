@@ -18,6 +18,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.List;
 
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
@@ -33,6 +34,10 @@ import org.eclipse.om2m.commons.resource.ContentInstance;
 import org.eclipse.om2m.commons.resource.Notify;
 import org.eclipse.om2m.commons.resource.StatusCode;
 import org.eclipse.om2m.commons.utils.XmlMapper;
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
+import org.json.simple.parser.ParseException;
 
 
 public class GeyserDatabase {
@@ -97,59 +102,7 @@ public class GeyserDatabase {
 		}
 		/* ********************************************************************************************/
 		
-		/* ***************************** Test SQL RDB ************************************************/
-
-		Statement stmt = null;
-		try{
-			//Register JDBC driver
-			Class.forName(JDBC_DRIVER);
-
-			//Open a connection
-			System.out.println("Connecting to database...");
-			rdb_conn = DriverManager.getConnection(DB_URL,USER,PASS);
-
-			//Execute a query
-			System.out.println("Creating statement...");
-			stmt = rdb_conn.createStatement();
-			String sql;
-			sql = "SELECT username FROM user";
-			ResultSet rs = stmt.executeQuery(sql);
-
-			//Extract data from result set
-			while(rs.next()){
-				//Retrieve by column name
-				String username = rs.getString("username");
-
-				//Display values
-				System.out.println("RDB username: " + username);
-
-			}
-			//Clean-up environment
-			rs.close();
-			stmt.close();
-			rdb_conn.close();
-		}catch(SQLException se){
-			//Handle errors for JDBC
-			se.printStackTrace();
-		}catch(Exception e){
-			//Handle errors for Class.forName
-			e.printStackTrace();
-		}finally{
-			//finally block used to close resources
-			try{
-				if(stmt!=null)
-					stmt.close();
-			}catch(SQLException se2){
-			}// nothing we can do
-			try{
-				if(rdb_conn!=null)
-					rdb_conn.close();
-			}catch(SQLException se){
-				se.printStackTrace();
-			}//end finally try
-		}//end try
-		System.out.println("Goodbye!");
-		/* ********************************************************************************************/
+		
 
 		/*	PSEUDO:
 		 * Subscribe to "applications"
@@ -158,7 +111,7 @@ public class GeyserDatabase {
 		 	* Subscribe to content (both DATA and SETTINGS?)
 		 * 
 		 */
-		/*
+		
 		//Look for all existing GEYSER applications and subscribe to them.
 		List<String> appList = nscl.retrieveApplicationList();
 		for(String app : appList){
@@ -169,7 +122,7 @@ public class GeyserDatabase {
 		}
 		
 		nscl.subscribeToApplications("database", "localhost:"+ APOC_PORT);
-		*/
+		
 
 	}
 	
@@ -232,6 +185,7 @@ public class GeyserDatabase {
 		 		* database/geyser_1234
 		 	* 
 			*/
+			
 			String target_resource = requestURI.substring(requestURI.lastIndexOf("/")+1);
 			if(target_resource.equalsIgnoreCase("application")){
 				
@@ -255,8 +209,86 @@ public class GeyserDatabase {
 				String jsonCommand = new String(ci.getContent().getValue(), StandardCharsets.ISO_8859_1);
 				System.out.println("Inbound command string for Geyser "+ target_geyserclient_id +": " + jsonCommand);
 
+
+
+				// ---------------------------- Parse jason and build SQL string ------------------
+
+				long geyser_id = (long)getValueFromJSON("id", jsonCommand);
+
+				double temp_inside = (double)getValueFromJSON("t1", jsonCommand);
+
+				boolean element = false;
+				String es = (String)getValueFromJSON("e", jsonCommand);
+				if(es.equalsIgnoreCase("ON"))
+					element = true;
+				else
+					element = false;
+
+				long temporarySTS = System.currentTimeMillis();
+				long temporaryCTS = temporarySTS;
+				
+
+				String sql = generateSQLgeyserDatapoint(temporarySTS, temporaryCTS, geyser_id, temp_inside, 55, 54, 25, 0, 0, element, false, false);
+				// ----------------------------------------------------------------------------------
+
+
+				/* ***************************** Test SQL RDB ************************************************/
+
+				Statement stmt = null;
+				try{
+					//Register JDBC driver
+					Class.forName(JDBC_DRIVER);
+
+					//Open a connection
+					System.out.println("Connecting to database...");
+					rdb_conn = DriverManager.getConnection(DB_URL,USER,PASS);
+
+					//Execute a query
+					System.out.println("Creating statement...");
+					stmt = rdb_conn.createStatement();
+					//ResultSet rs = stmt.executeQuery(sql);
+					stmt.executeUpdate(sql);
+
+					/* -- TODO: Confirm of request was successful
+				//Extract data from result set
+				while(rs.next()){
+					//Retrieve by column name
+					String username = rs.getString("username");
+
+					//Display values
+					System.out.println("RDB username: " + username);
+
+				}
+					 */
+
+					//Clean-up environment
+					//rs.close();
+					stmt.close();
+					rdb_conn.close();
+				}catch(SQLException se){
+					//Handle errors for JDBC
+					se.printStackTrace();
+				}catch(Exception e){
+					//Handle errors for Class.forName
+					e.printStackTrace();
+				}finally{
+					//finally block used to close resources
+					try{
+						if(stmt!=null)
+							stmt.close();
+					}catch(SQLException se2){
+					}// nothing we can do
+					try{
+						if(rdb_conn!=null)
+							rdb_conn.close();
+					}catch(SQLException se){
+						se.printStackTrace();
+					}//end finally try
+				}//end try
+				System.out.println("Goodbye!");
+				/* ********************************************************************************************/
 			}
-			
+
 		}
 	}
 	
@@ -267,6 +299,43 @@ public class GeyserDatabase {
 			System.out.println("Geyser ID failure."); 
 			return (long)0000;
 		}
+	}
+	
+	private static Object getValueFromJSON(String key, String JSON){
+
+		JSONParser parser=new JSONParser();
+		try{
+			Object obj = parser.parse(JSON);
+			JSONArray array = new JSONArray();
+			array.add(obj);	
+			JSONObject jobj = (JSONObject)array.get(0);
+
+			return jobj.get(key);
+
+		}catch(ParseException pe){
+			System.out.println("JSON parse exeption at position: " + pe.getPosition() + " : " + pe);
+			return "Error";
+		}
+	}
+	
+	private static String generateSQLgeyserDatapoint(long serverTS, long clientTS, long geyser_id, double t_inside, double t_inlet, double t_outlet, double t_ambient, int flow1, int flow2, boolean element, boolean valve, boolean drip){
+		
+		System.out.println(new java.sql.Timestamp(serverTS));
+		
+		return "INSERT INTO timestamps(server_stamp, client_stamp, geyser_id, temp_inside, temp_inlet, temp_outlet, temp_ambient, flow_1, flow_2, element,valve, drip_detect)"
+				+ "VALUES(" + serverTS
+				+ ", " + clientTS
+				+ ", " + geyser_id
+				+ ", " + t_inside
+				+ ", " + t_inlet
+				+ ", " + t_outlet
+				+ ", " + t_ambient
+				+ ", " + flow1
+				+ ", " + flow2
+				+ ", " + element
+				+ ", " + valve
+				+ ", " + drip
+				+")";
 	}
 }
 
