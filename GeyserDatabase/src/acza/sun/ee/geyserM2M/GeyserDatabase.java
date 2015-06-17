@@ -43,25 +43,28 @@ import org.json.simple.parser.ParseException;
 public class GeyserDatabase {
 
 	
-	private static SCLapi nscl = new SCLapi();
+	private static SCLapi nscl = new SCLapi("nscl", "52.10.236.177", "8080", "admin:admin");
+	
+	private static String APOC_URL;
 	private static int APOC_PORT;
+	private static String APOC;
 
 	// JDBC driver name and database URL
 	private static final String JDBC_DRIVER = "com.mysql.jdbc.Driver";  
-	private static final String DB_URL = "jdbc:mysql://localhost/GeyserSimM2M";
+	private static String DB_URL;//DB_URL = "jdbc:mysql://localhost/GeyserSimM2M"; geyserm2m.cuxbzsmchnt1.us-west-2.rds.amazonaws.com
 
 	//  Database credentials
-	private static final String USER = "root";
-	private static final String PASS = "2538";
+	private static String USER;
+	private static final String PASS = "gnm2mnscl";
 	
 	private static Connection rdb_conn = null;
 	
 
 	public static void main(String args[]){
 		// ---------------------- Sanity checking of command line arguments -------------------------------------------
-		if( args.length != 2)
+		if( args.length != 5)
 		{
-			System.out.println( "Usage: <NSCL IP address> <aPoc server port>  <TODO: Database parameters>" ) ;
+			System.out.println( "Usage: <NSCL IP address> <aPoc URL> <aPoc PORT>  <database URL> <database USER>" ) ;
 			return;
 		}
 
@@ -71,13 +74,18 @@ public class GeyserDatabase {
 			return;
 		}
 
-		;
+		APOC_URL = args[1];
 		try{
-			APOC_PORT = Integer.parseInt( args[1] ); // Convert the argument to ensure that is it valid
+			APOC_PORT = Integer.parseInt( args[2] ); // Convert the argument to ensure that is it valid
 		}catch ( Exception e ){
 			System.out.println( "aPoc port invalid." ) ;
 			return;
 		}
+		APOC = APOC_URL + ":" + APOC_PORT;
+		
+		
+		DB_URL = "jdbc:mysql://"+ args[3] +"/GeyserM2M";
+		USER = args[4];
 		//---------------------------------------------------------------------------------------------------------------
 
 		/* ***************************** START APOC SERVER ************************************************/
@@ -116,12 +124,12 @@ public class GeyserDatabase {
 		List<String> appList = nscl.retrieveApplicationList();
 		for(String app : appList){
 			if(app.startsWith("geyser")){
-				nscl.subscribeToContent(getGeyserIdFromString(app), "DATA", "geyser", "localhost:"+ APOC_PORT);
+				nscl.subscribeToContent(getGeyserIdFromString(app), "DATA", "geyser", APOC);
 			}
 			
 		}
 		
-		nscl.subscribeToApplications("database", "localhost:"+ APOC_PORT);
+		nscl.subscribeToApplications("database", APOC);
 		
 
 	}
@@ -142,7 +150,6 @@ public class GeyserDatabase {
 
 		@Override
 		protected void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-			System.out.println("Inbound POST apoc request received");
 
 			String requestURI = request.getRequestURI();
 			
@@ -159,33 +166,9 @@ public class GeyserDatabase {
 			
 			XmlMapper xm = XmlMapper.getInstance();
 			Notify notify = (Notify) xm.xmlToObject(builder.toString());
-			System.out.println("Inbound notification: " + notify.getStatusCode());
-			
-			//Debug
-			System.out.println("Request URI: " + requestURI);
-			//System.out.println(builder);
-			//System.out.println(new String(notify.getRepresentation().getValue(), StandardCharsets.ISO_8859_1));
-			
-						
-			/* PSEUDO:
-			 * If notification is of type "application"
-			 	* If status = "STATUS_CREATED"
-			 		* subscribe to new content
-		 		* else if status = "STATUS_DELETED"
-		 			* do nothing
-	 			* else
-	 				* email admin.
-			 	* (Tables in RDB will have been created beforehand by admin)
-			 * Else, if it is of type "content"
-			 	* Put content in database.
-			 	* 
-		 	* 
-		 	* Only 2 URI possibilities
-		 		* database/application
-		 		* database/geyser_1234
-		 	* 
-			*/
-			
+			System.out.println("Inbound notification: " + notify.getStatusCode() + " -- Request URI: " + requestURI);
+
+			//(1)
 			String target_resource = requestURI.substring(requestURI.lastIndexOf("/")+1);
 			if(target_resource.equalsIgnoreCase("application")){
 				
@@ -193,7 +176,7 @@ public class GeyserDatabase {
 				if(notify.getStatusCode().equals(StatusCode.STATUS_CREATED)){
 					System.out.println("New application registered : " + app.getAppId());
 					System.out.println("Geyser ID parser: " + getGeyserIdFromString(app.getAppId()));
-					nscl.subscribeToContent(getGeyserIdFromString(app.getAppId()), "DATA", "geyser", "localhost:"+ APOC_PORT);
+					nscl.subscribeToContent(getGeyserIdFromString(app.getAppId()), "DATA", "geyser", APOC);
 				}
 				else if(notify.getStatusCode().equals(StatusCode.STATUS_DELETED)){
 					System.out.println("Application deregistered : " + app.getAppId());
@@ -201,92 +184,60 @@ public class GeyserDatabase {
 				else{
 					System.out.println("Unexpexted application notification status code.");
 				}
+				System.out.println();
 			}
 			else if(target_resource.startsWith("geyser")){
 				Long target_geyserclient_id = getGeyserIdFromString(target_resource);
 				ContentInstance ci = (ContentInstance) xm.xmlToObject(new String(notify.getRepresentation().getValue(), StandardCharsets.ISO_8859_1));
-				System.out.println("Inbound content instance: " + ci.getId());
 				String jsonCommand = new String(ci.getContent().getValue(), StandardCharsets.ISO_8859_1);
-				System.out.println("Inbound command string for Geyser "+ target_geyserclient_id +": " + jsonCommand);
+				System.out.println("Inbound data string for Geyser "+ target_geyserclient_id +": " + jsonCommand);
 
 
-
-				// ---------------------------- Parse jason and build SQL string ------------------
-
-				long geyser_id = (long)getValueFromJSON("id", jsonCommand);
-
-				double temp_inside = (double)getValueFromJSON("t1", jsonCommand);
-
-				boolean element = false;
-				String es = (String)getValueFromJSON("e", jsonCommand);
-				if(es.equalsIgnoreCase("ON"))
-					element = true;
-				else
-					element = false;
-
-				long temporarySTS = System.currentTimeMillis();
-				long temporaryCTS = temporarySTS;
-				
-
-				String sql = generateSQLgeyserDatapoint(temporarySTS, temporaryCTS, geyser_id, temp_inside, 55, 54, 25, 0, 0, element, false, false);
-				// ----------------------------------------------------------------------------------
-
-
-				/* ***************************** Test SQL RDB ************************************************/
-
-				Statement stmt = null;
+				//Parse JSON, build SQL string and insert into database
 				try{
-					//Register JDBC driver
-					Class.forName(JDBC_DRIVER);
+					String sql = generateSQLDatapointEntry(jsonCommand);
 
-					//Open a connection
-					System.out.println("Connecting to database...");
-					rdb_conn = DriverManager.getConnection(DB_URL,USER,PASS);
-
-					//Execute a query
-					System.out.println("Creating statement...");
-					stmt = rdb_conn.createStatement();
-					//ResultSet rs = stmt.executeQuery(sql);
-					stmt.executeUpdate(sql);
-
-					/* -- TODO: Confirm of request was successful
-				//Extract data from result set
-				while(rs.next()){
-					//Retrieve by column name
-					String username = rs.getString("username");
-
-					//Display values
-					System.out.println("RDB username: " + username);
-
-				}
-					 */
-
-					//Clean-up environment
-					//rs.close();
-					stmt.close();
-					rdb_conn.close();
-				}catch(SQLException se){
-					//Handle errors for JDBC
-					se.printStackTrace();
-				}catch(Exception e){
-					//Handle errors for Class.forName
-					e.printStackTrace();
-				}finally{
-					//finally block used to close resources
+					Statement stmt = null;
 					try{
-						if(stmt!=null)
-							stmt.close();
-					}catch(SQLException se2){
-					}// nothing we can do
-					try{
-						if(rdb_conn!=null)
-							rdb_conn.close();
+						//Register JDBC driver
+						Class.forName(JDBC_DRIVER);
+
+						//Open a connection
+						rdb_conn = DriverManager.getConnection(DB_URL,USER,PASS);
+
+						//Execute a query
+						stmt = rdb_conn.createStatement();
+						stmt.executeUpdate(sql);
+						System.out.println("Inserted into RDB.");
+						System.out.println();
+						
+						stmt.close();
+						rdb_conn.close();
 					}catch(SQLException se){
+						//Handle errors for JDBC
 						se.printStackTrace();
-					}//end finally try
-				}//end try
-				System.out.println("Goodbye!");
-				/* ********************************************************************************************/
+					}catch(Exception e){
+						//Handle errors for Class.forName
+						e.printStackTrace();
+					}finally{
+						//finally block used to close resources
+						try{
+							if(stmt!=null)
+								stmt.close();
+						}catch(SQLException se2){
+						}// nothing we can do
+						try{
+							if(rdb_conn!=null)
+								rdb_conn.close();
+						}catch(SQLException se){
+							se.printStackTrace();
+						}
+					}
+					
+				}catch(ParseException pe){
+					System.out.println("Corrupt inbound  JSON: " + jsonCommand);
+					System.out.println("Parse exeption at position: " + pe.getPosition() + " : " + pe);
+				}
 			}
 
 		}
@@ -301,41 +252,137 @@ public class GeyserDatabase {
 		}
 	}
 	
-	private static Object getValueFromJSON(String key, String JSON){
+	private static Object getValueFromJSON(String key, String JSON) throws ParseException{
 
 		JSONParser parser=new JSONParser();
-		try{
-			Object obj = parser.parse(JSON);
-			JSONArray array = new JSONArray();
-			array.add(obj);	
-			JSONObject jobj = (JSONObject)array.get(0);
 
-			return jobj.get(key);
+		Object obj = parser.parse(JSON);
+		JSONArray array = new JSONArray();
+		array.add(obj);	
+		JSONObject jobj = (JSONObject)array.get(0);
 
-		}catch(ParseException pe){
-			System.out.println("JSON parse exeption at position: " + pe.getPosition() + " : " + pe);
-			return "Error";
-		}
+		return jobj.get(key);
 	}
 	
-	private static String generateSQLgeyserDatapoint(long serverTS, long clientTS, long geyser_id, double t_inside, double t_inlet, double t_outlet, double t_ambient, int flow1, int flow2, boolean element, boolean valve, boolean drip){
+	//Important. If the JSON is corrupt no entry should be written to RDB. This function must throw an exception.
+	private static String generateSQLDatapointEntry(String jsonDatapoint) throws ParseException{
 		
-		System.out.println(new java.sql.Timestamp(serverTS));
+		//Geyser ID
+		long geyser_id = (long)getValueFromJSON("ID", jsonDatapoint);
+
+		//Version
+		long version = 0001;
 		
-		return "INSERT INTO timestamps(server_stamp, client_stamp, geyser_id, temp_inside, temp_inlet, temp_outlet, temp_ambient, flow_1, flow_2, element,valve, drip_detect)"
-				+ "VALUES(" + serverTS
-				+ ", " + clientTS
-				+ ", " + geyser_id
-				+ ", " + t_inside
-				+ ", " + t_inlet
-				+ ", " + t_outlet
-				+ ", " + t_ambient
-				+ ", " + flow1
-				+ ", " + flow2
-				+ ", " + element
-				+ ", " + valve
-				+ ", " + drip
+		//Timestamps 
+		long temporarySTS = System.currentTimeMillis();
+		java.sql.Timestamp serverTS = new java.sql.Timestamp(temporarySTS);
+		java.sql.Timestamp clientTS = serverTS;
+		
+		//Relay state
+		boolean relay_state = false; //(2)
+		String rs = (String)getValueFromJSON("Rstate", jsonDatapoint);
+		if(rs.equalsIgnoreCase("ON"))
+			relay_state = true;
+		else
+			relay_state = false;
+		
+		//Valve state
+		boolean valve_state = false; 
+		String vs = (String)getValueFromJSON("Vstate", jsonDatapoint);
+		if(vs.equalsIgnoreCase("OPEN"))
+			relay_state = true;
+		else
+			relay_state = false;
+		
+		//Drip detect (Geyser state)
+		boolean drip_detect = false;
+		//String gs = (String)getValueFromJSON("Gstate", jsonDatapoint);
+		//if(gs.equalsIgnoreCase("OK"))
+		//	relay_state = true;
+		//else
+		//	relay_state = false;
+		
+		//Temperatures
+		long t1 = (long)getValueFromJSON("T1", jsonDatapoint);
+		long t2 = (long)getValueFromJSON("T2", jsonDatapoint); 
+		long t3 = (long)getValueFromJSON("T3", jsonDatapoint);
+		long t4 = (long)getValueFromJSON("T4", jsonDatapoint);
+
+		//TODO
+		long watt_avgpmin = (long)getValueFromJSON("KW", jsonDatapoint);;
+		long kwatt_tot = 0;
+		long hot_flow_ratepmin = 0;
+		long hot_litres_tot = 0;
+		long cold_flow_ratepmin = 0;
+		long cold_litres_tot = 0;
+
+
+
+		
+		return "INSERT INTO timestamps(geyser_id, version, server_stamp, client_stamp, relay_state, valve_state, drip_detect, "
+				+ "t1, t2, t3, t4, watt_avgpmin, kwatt_tot, hot_flow_ratepmin, hot_litres_tot, cold_flow_ratepmin, cold_litres_tot)"
+				+ "VALUES(" + geyser_id
+				+ ", " + version
+				+ ", " + "'" + serverTS + "'"
+				+ ", " +  "'" + clientTS + "'"
+				+ ", " + relay_state //(2)
+				+ ", " + valve_state
+				+ ", " + drip_detect
+				+ ", " + t1
+				+ ", " + t2
+				+ ", " + t3
+				+ ", " + t4
+				+ ", " + watt_avgpmin
+				+ ", " + kwatt_tot
+				+ ", " + hot_flow_ratepmin 
+				+ ", " + hot_litres_tot 
+				+ ", " + cold_flow_ratepmin 
+				+ ", " + cold_litres_tot 
 				+")";
 	}
 }
+
+/*------------- NOTES -----------------------------------
+ * (1)
+ * PSEUDO:
+ * If notification is of type "application"
+ 	* If status = "STATUS_CREATED"
+ 		* subscribe to new content
+		* else if status = "STATUS_DELETED"
+			* do nothing
+		* else
+			* email admin.
+ 	* (Tables in RDB will have been created beforehand by admin)
+ * Else, if it is of type "content"
+ 	* Put content in database.
+ 	* 
+	* 
+	* Only 2 URI possibilities
+		* database/application
+		* database/geyser_1234
+	* 
+ * 
+ * 
+ * (2)
+ * MySQL DOES have native boolean types it just says that it is tinyints(1). 
+ * But if you give it true or false, it will insert 1 or 0
+ * 
+ * (3)
+ * "Ver":version, 
+ * "ID":"id",
+ * "Tstamp":timestamp (UNIX in seconds)
+ * "Rstate":"relayState",
+ * "Vstate":"valveState",
+ * "Gstate":"geyserState",
+ * "T1":temperature1,
+ * "T2":temperature2,
+ * "T3":temperature3,
+ * "T4":temperature4,
+ * "KW":power,
+ * "KWH":energy,
+ * "HLmin":HflowRate,
+ * "HLtotal":HtotalLitres,
+ * "CLmin":CflowRate,
+ * "CLtotal":CtotalLitres,
+ *-------------------------------------------------------*/
 
