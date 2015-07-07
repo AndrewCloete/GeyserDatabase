@@ -38,12 +38,14 @@ import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 
 
 public class GeyserDatabase {
 
-	
-	private static SCLapi nscl = new SCLapi("nscl", "52.10.236.177", "8080", "admin:admin");
+	private static final Logger logger = LogManager.getLogger(GeyserDatabase.class);
+	private static SCLapi nscl;
 	
 	private static String APOC_URL;
 	private static int APOC_PORT;
@@ -88,6 +90,9 @@ public class GeyserDatabase {
 		USER = args[4];
 		//---------------------------------------------------------------------------------------------------------------
 
+		logger.info("GeyserDatabase Usage: <NSCL IP address> <aPoc URL> <aPoc PORT>  <database URL> <database USER>");
+		logger.info("GeyserDatabase started with parameters: " + args[0] + " " + args[1] + " " + args[2] + " " + args[3] + " " + args[4]);
+		nscl = new SCLapi("nscl", NSCL_IP_ADD, "8080", "admin:admin");
 		/* ***************************** START APOC SERVER ************************************************/
 
 		Server server = new Server(APOC_PORT);
@@ -102,10 +107,9 @@ public class GeyserDatabase {
 
 		try {
 			server.start();
-			System.out.println("Apoc server started.");
-		} catch (Exception e1) {
-			System.out.println("Apoc server failed.");
-			e1.printStackTrace();
+			logger.info("Apoc server started.");
+		} catch (Exception e) {
+			logger.fatal("Apoc server failed to start.", e);
 			return;
 		}
 		/* ********************************************************************************************/
@@ -173,18 +177,20 @@ public class GeyserDatabase {
 			if(target_resource.equalsIgnoreCase("application")){
 				
 				Application app = (Application) xm.xmlToObject(new String(notify.getRepresentation().getValue(), StandardCharsets.ISO_8859_1));
-				if(notify.getStatusCode().equals(StatusCode.STATUS_CREATED)){
-					System.out.println("New application registered : " + app.getAppId());
-					System.out.println("Geyser ID parser: " + getGeyserIdFromString(app.getAppId()));
-					nscl.subscribeToContent(getGeyserIdFromString(app.getAppId()), "DATA", "geyser", APOC);
+				if(app.getAppId().startsWith("geyser")){
+					if(notify.getStatusCode().equals(StatusCode.STATUS_CREATED)){
+						logger.info("New application registered : " + app.getAppId());
+						logger.info("Geyser ID parser: " + getGeyserIdFromString(app.getAppId()));
+						nscl.subscribeToContent(getGeyserIdFromString(app.getAppId()), "DATA", "geyser", APOC);
+					}
+					else if(notify.getStatusCode().equals(StatusCode.STATUS_DELETED)){
+						logger.warn("Application deregistered : " + app.getAppId());
+					}
+					else{
+						logger.warn("Unexpexted application notification status code: " + notify.getStatusCode());
+					}
+					System.out.println();
 				}
-				else if(notify.getStatusCode().equals(StatusCode.STATUS_DELETED)){
-					System.out.println("Application deregistered : " + app.getAppId());
-				}
-				else{
-					System.out.println("Unexpexted application notification status code.");
-				}
-				System.out.println();
 			}
 			else if(target_resource.startsWith("geyser")){
 				Long target_geyserclient_id = getGeyserIdFromString(target_resource);
@@ -215,29 +221,32 @@ public class GeyserDatabase {
 						rdb_conn.close();
 					}catch(SQLException se){
 						//Handle errors for JDBC
-						se.printStackTrace();
+						logger.error("SQLException: ", se);
 					}catch(Exception e){
 						//Handle errors for Class.forName
-						e.printStackTrace();
+						logger.error("Unexpected database exception: ", e);
 					}finally{
 						//finally block used to close resources
 						try{
 							if(stmt!=null)
 								stmt.close();
 						}catch(SQLException se2){
+							logger.error("SQLException closing statement: ", se2);
 						}// nothing we can do
 						try{
 							if(rdb_conn!=null)
 								rdb_conn.close();
 						}catch(SQLException se){
-							se.printStackTrace();
+							logger.error("SQLException closing database connection: ", se);
 						}
 					}
 					
 				}catch(ParseException pe){
-					System.out.println("Corrupt inbound  JSON: " + jsonCommand);
-					System.out.println("Parse exeption at position: " + pe.getPosition() + " : " + pe);
+					logger.error("Corrupt inbound  JSON: " + jsonCommand + ". Parse exeption at position: " + pe.getPosition(), pe);
 				}
+			}
+			else{
+				logger.warn("Unknown target resource apoc recieved: " + target_resource);
 			}
 
 		}
@@ -247,7 +256,7 @@ public class GeyserDatabase {
 		try{
 			return new Long(appId.substring(appId.lastIndexOf("_")+1));
 		} catch (Exception e){
-			System.out.println("Geyser ID failure."); 
+			logger.error("Geyser ID failure. Using defualt ID '0000'"); 
 			return (long)0000;
 		}
 	}
@@ -274,9 +283,15 @@ public class GeyserDatabase {
 		long version = 0001;
 		
 		//Timestamps 
-		long temporarySTS = System.currentTimeMillis();
-		java.sql.Timestamp serverTS = new java.sql.Timestamp(temporarySTS);
-		java.sql.Timestamp clientTS = serverTS;
+		java.sql.Timestamp serverTS = new java.sql.Timestamp(System.currentTimeMillis());
+		
+		java.sql.Timestamp clientTS;
+		try{
+			long clientUnixTS = (long)getValueFromJSON("Tstamp", jsonDatapoint);
+			clientTS = new java.sql.Timestamp(clientUnixTS*1000);
+		}catch(Exception e){
+			clientTS = serverTS;
+		}
 		
 		//Relay state
 		boolean relay_state = false; //(2)
