@@ -57,7 +57,7 @@ public class GeyserDatabase {
 
 	//  Database credentials
 	private static String USER;
-	private static final String PASS = "gnm2mnscl";
+	private static final String PASS = "ewhM2Mnscl";
 	
 	private static Connection rdb_conn = null;
 	
@@ -181,6 +181,11 @@ public class GeyserDatabase {
 					if(notify.getStatusCode().equals(StatusCode.STATUS_CREATED)){
 						logger.info("New application registered : " + app.getAppId());
 						logger.info("Geyser ID parser: " + getGeyserIdFromString(app.getAppId()));
+						try {
+							Thread.sleep(200);	//Sleep to ensure container exists before subscribing.
+						} catch (InterruptedException e) {
+							logger.warn("Could not sleep thread for appID: " + app.getAppId(), e);
+						}
 						nscl.subscribeToContent(getGeyserIdFromString(app.getAppId()), "DATA", "geyser", APOC);
 					}
 					else if(notify.getStatusCode().equals(StatusCode.STATUS_DELETED)){
