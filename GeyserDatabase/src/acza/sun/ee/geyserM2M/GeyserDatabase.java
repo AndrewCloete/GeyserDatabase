@@ -44,6 +44,8 @@ import org.apache.logging.log4j.LogManager;
 
 public class GeyserDatabase {
 
+	private static final String USAGE_STRING = "<NSCL base URL> <Auth> <aPoc IP> <aPoc PORT>  <database IP> <database USER>";
+	
 	private static final Logger logger = LogManager.getLogger(GeyserDatabase.class);
 	private static SCLapi nscl;
 	
@@ -64,21 +66,19 @@ public class GeyserDatabase {
 
 	public static void main(String args[]){
 		// ---------------------- Sanity checking of command line arguments -------------------------------------------
-		if( args.length != 5)
+		if( args.length != 6)
 		{
-			System.out.println( "Usage: <NSCL IP address> <aPoc URL> <aPoc PORT>  <database URL> <database USER>" ) ;
+			System.out.println( "Usage: " + USAGE_STRING) ;
 			return;
 		}
 
-		final String NSCL_IP_ADD = args[0];//"52.10.236.177";//"localhost";//
-		if(!ipAddressValidator(NSCL_IP_ADD)){
-			System.out.println( "IPv4 address invalid." ) ;
-			return;
-		}
+		final String NSCL_BASE_URL = args[0];//"52.10.236.177";//"localhost";//
 
-		APOC_URL = args[1];
+		final String AUTH = args[1];
+		
+		APOC_URL = args[2];
 		try{
-			APOC_PORT = Integer.parseInt( args[2] ); // Convert the argument to ensure that is it valid
+			APOC_PORT = Integer.parseInt( args[3] ); // Convert the argument to ensure that is it valid
 		}catch ( Exception e ){
 			System.out.println( "aPoc port invalid." ) ;
 			return;
@@ -86,13 +86,18 @@ public class GeyserDatabase {
 		APOC = APOC_URL + ":" + APOC_PORT;
 		
 		
-		DB_URL = "jdbc:mysql://"+ args[3] +"/GeyserM2M";
-		USER = args[4];
+		DB_URL = "jdbc:mysql://"+ args[4] +"/GeyserM2M";
+		USER = args[5];
 		//---------------------------------------------------------------------------------------------------------------
 
-		logger.info("GeyserDatabase Usage: <NSCL IP address> <aPoc URL> <aPoc PORT>  <database URL> <database USER>");
-		logger.info("GeyserDatabase started with parameters: " + args[0] + " " + args[1] + " " + args[2] + " " + args[3] + " " + args[4]);
-		nscl = new SCLapi("nscl", NSCL_IP_ADD, "8080", "admin:admin");
+		logger.info("GeyserDatabase Usage: " + USAGE_STRING);
+		logger.info("GeyserDatabase started with parameters: " + args[0] + " " + args[1] + " " + args[2] + " " + args[3] + " " + args[4] + " " + args[5]);
+		
+		if(AUTH.equalsIgnoreCase("NONE"))
+			nscl = new SCLapi(NSCL_BASE_URL);	//OpenMTC
+		else
+			nscl = new SCLapi(NSCL_BASE_URL, AUTH); //OM2M
+		
 		/* ***************************** START APOC SERVER ************************************************/
 
 		Server server = new Server(APOC_PORT);
@@ -186,7 +191,11 @@ public class GeyserDatabase {
 						} catch (InterruptedException e) {
 							logger.warn("Could not sleep thread for appID: " + app.getAppId(), e);
 						}
-						nscl.subscribeToContent(getGeyserIdFromString(app.getAppId()), "DATA", "geyser", APOC);
+						try{
+							nscl.subscribeToContent(getGeyserIdFromString(app.getAppId()), "DATA", "geyser", APOC);
+						}catch(Exception e){
+							logger.fatal("Unable to subscribe to new application", e);
+						}
 					}
 					else if(notify.getStatusCode().equals(StatusCode.STATUS_DELETED)){
 						logger.warn("Application deregistered : " + app.getAppId());
@@ -248,6 +257,8 @@ public class GeyserDatabase {
 					
 				}catch(ParseException pe){
 					logger.error("Corrupt inbound  JSON: " + jsonCommand + ". Parse exeption at position: " + pe.getPosition(), pe);
+				}catch(ClassCastException pe){
+					logger.error("Corrupt inbound data: " + jsonCommand, pe);
 				}
 			}
 			else{
@@ -279,7 +290,7 @@ public class GeyserDatabase {
 	}
 	
 	//Important. If the JSON is corrupt no entry should be written to RDB. This function must throw an exception.
-	private static String generateSQLDatapointEntry(String jsonDatapoint) throws ParseException{
+	private static String generateSQLDatapointEntry(String jsonDatapoint) throws ParseException, ClassCastException{
 		
 		//Geyser ID
 		long geyser_id = (long)getValueFromJSON("ID", jsonDatapoint);
@@ -296,6 +307,7 @@ public class GeyserDatabase {
 			clientTS = new java.sql.Timestamp(clientUnixTS*1000);
 		}catch(Exception e){
 			clientTS = serverTS;
+			System.out.println("No client timestamps recieved.");
 		}
 		
 		//Relay state
@@ -316,11 +328,14 @@ public class GeyserDatabase {
 		
 		//Drip detect (Geyser state)
 		boolean drip_detect = false;
-		//String gs = (String)getValueFromJSON("Gstate", jsonDatapoint);
-		//if(gs.equalsIgnoreCase("OK"))
-		//	relay_state = true;
-		//else
-		//	relay_state = false;
+		String gs = (String)getValueFromJSON("Gstate", jsonDatapoint);
+		if(gs.equalsIgnoreCase("OK")){
+			relay_state = true;
+		}	
+		else{
+			relay_state = false;
+			logger.warn("BURST flag from geyser: " + geyser_id);
+		}
 		
 		//Temperatures
 		long t1 = (long)getValueFromJSON("T1", jsonDatapoint);
@@ -328,13 +343,12 @@ public class GeyserDatabase {
 		long t3 = (long)getValueFromJSON("T3", jsonDatapoint);
 		long t4 = (long)getValueFromJSON("T4", jsonDatapoint);
 
-		//TODO
-		long watt_avgpmin = (long)getValueFromJSON("KW", jsonDatapoint);;
-		long kwatt_tot = 0;
-		long hot_flow_ratepmin = 0;
-		long hot_litres_tot = 0;
-		long cold_flow_ratepmin = 0;
-		long cold_litres_tot = 0;
+		double watt_avgpmin = (double)getValueFromJSON("KW", jsonDatapoint);
+		double kwatt_tot = (double)getValueFromJSON("KWH", jsonDatapoint);
+		double hot_flow_ratepmin = (double)getValueFromJSON("HLmin", jsonDatapoint);
+		double hot_litres_tot = (double)getValueFromJSON("HLtotal", jsonDatapoint);
+		double cold_flow_ratepmin = (double)getValueFromJSON("CLmin", jsonDatapoint);
+		double cold_litres_tot = (double)getValueFromJSON("CLtotal", jsonDatapoint);
 
 
 
