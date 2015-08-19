@@ -322,18 +322,18 @@ public class GeyserDatabase {
 		boolean valve_state = false; 
 		String vs = (String)getValueFromJSON("Vstate", jsonDatapoint);
 		if(vs.equalsIgnoreCase("OPEN"))
-			relay_state = true;
+			valve_state = true;
 		else
-			relay_state = false;
+			valve_state = false;
 		
 		//Drip detect (Geyser state)
 		boolean drip_detect = false;
 		String gs = (String)getValueFromJSON("Gstate", jsonDatapoint);
 		if(gs.equalsIgnoreCase("OK")){
-			relay_state = true;
+			drip_detect = true;
 		}	
 		else{
-			relay_state = false;
+			drip_detect = false;
 			logger.warn("BURST flag from geyser: " + geyser_id);
 		}
 		
@@ -359,8 +359,8 @@ public class GeyserDatabase {
 				+ ", " + version
 				+ ", " + "'" + serverTS + "'"
 				+ ", " +  "'" + clientTS + "'"
-				+ ", " + relay_state //(2)
-				+ ", " + valve_state
+				+ ", " + relay_state  //(2)
+				+ ", " + valve_state 
 				+ ", " + drip_detect
 				+ ", " + t1
 				+ ", " + t2

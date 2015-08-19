@@ -8,8 +8,13 @@ select * from user;
 
 select * from geyser;
 
-select server_stamp,client_stamp,t1,t2,t3,t4 from timestamps where geyser_id=112;
+select client_stamp,t1,t2,t3,t4,relay_state,watt_avgpmin,kwatt_tot,hot_litres_tot from timestamps where server_stamp>='2015-08-01 00:00:00' and geyser_id=102
 select * from timestamps;
+
+alter table tblName modify columnName newDataType;
+alter table timestamps modify drip_detect tinyint(1);
+alter table timestamps modify relay_state tinyint(1);
+alter table timestamps modify valve_state tinyint(1);
 
 
 //--------------------------------------------SIMULATION1----------------------------------------------------------------------------------------------------------------------------
